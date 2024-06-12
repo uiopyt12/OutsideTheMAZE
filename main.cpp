@@ -2,6 +2,7 @@
 #include <iostream>
 #include <stack>
 #include <vector>
+#include <queue>
 #include <cstdlib>
 #include <ctime>
 
@@ -13,11 +14,17 @@ const int MAP_HEIGHT = 20;
 const int CELL_SIZE = 40;
 
 // 방향 벡터
-const vector<Vector2i> directions = {
+const vector<Vector2i> directions = { // 미로를 뚫는 데 사용
     Vector2i(2, 0),
     Vector2i(-2, 0),
     Vector2i(0, 2),
     Vector2i(0, -2)
+};
+const vector<Vector2i> OneDirections = { // 큐를 활용한 bfs에서 사용
+    Vector2i(1, 0),
+    Vector2i(-1, 0),
+    Vector2i(0, 1),
+    Vector2i(0, -1)
 };
 
 bool isValid(int x, int y, vector<vector<bool>>& visited) {
@@ -62,18 +69,55 @@ void generateMaze(int startX, int startY, int gameMap[], vector<RectangleShape>&
 
     // 출구 추가
     gameMap[(MAP_WIDTH - 2) + (MAP_HEIGHT - 2) * MAP_WIDTH] = 0;
+    gameMap[0] = gameMap[1] = gameMap[MAP_WIDTH] = 0;
+}
+
+vector<Vector2i> findPath(Vector2i start, Vector2i goal, int gameMap[]) {
+    queue<Vector2i> q;
+    vector<vector<Vector2i>> prev(MAP_WIDTH, vector<Vector2i>(MAP_HEIGHT, Vector2i(-1, -1)));
+    vector<vector<bool>> visited(MAP_WIDTH, vector<bool>(MAP_HEIGHT, false));
+
+    q.push(start);
+    visited[start.x][start.y] = true;
+
+    while (!q.empty()) {
+        Vector2i current = q.front();
+        q.pop();
+
+        if (current == goal)
+            break;
+
+        for (auto dir : OneDirections) {
+            int newX = current.x + dir.x;
+            int newY = current.y + dir.y;
+
+            if (newX >= 0 && newX < MAP_WIDTH && newY >= 0 && newY < MAP_HEIGHT && gameMap[newX + newY * MAP_WIDTH] == 0 && !visited[newX][newY]) {
+                q.push(Vector2i(newX, newY));
+                visited[newX][newY] = true;
+                prev[newX][newY] = current;
+            }
+        }
+    }
+
+    vector<Vector2i> path;
+    for (Vector2i at = goal; at != Vector2i(-1, -1); at = prev[at.x][at.y])
+        path.push_back(at);
+    reverse(path.begin(), path.end());
+    return path;
 }
 
 int main() {
-    RenderWindow window(VideoMode(1800, 800), "Outside The MAZE", Style::Titlebar);
+    RenderWindow window(VideoMode(1800, 800), "Outside The MAZE", Style::None);
+    RenderWindow chase(VideoMode(200, 200), "Chase Window", Style::None);
     window.setPosition(Vector2i(50, 100));
+    chase.setPosition(Vector2i(50, 100));
 
     Vector2i player(1, 1);
     RectangleShape playerRect(Vector2f(CELL_SIZE, CELL_SIZE));
     playerRect.setPosition(player.x * CELL_SIZE, player.y * CELL_SIZE);
     playerRect.setFillColor(Color(50, 200, 150));
     playerRect.setOutlineColor(Color(0, 0, 0));
-    
+
     Vector2i opponent(1, 1);
     RectangleShape opponentRect(Vector2f(CELL_SIZE, CELL_SIZE));
     opponentRect.setPosition(opponent.x * CELL_SIZE, opponent.y * CELL_SIZE);
@@ -107,11 +151,17 @@ int main() {
         }
     }
 
-    while (window.isOpen()) {
+    Vector2i goal(MAP_WIDTH - 2, MAP_HEIGHT - 2);
+    vector<Vector2i> path = findPath(opponent, goal, gameMap);
+    size_t pathIndex = 0;
+    Clock clock;
+
+    while (window.isOpen() && chase.isOpen()) {
         Event event;
         while (window.pollEvent(event)) {
             if (event.type == Event::Closed) {
                 window.close();
+                chase.close();
             }
             else if (event.type == Event::KeyPressed) {
                 int newX = player.x;
@@ -147,22 +197,55 @@ int main() {
                 window.setPosition(Vector2i(50 + (player.x / 5) * 200, 100 + (player.y / 5) * 200));
                 window.setSize(Vector2u(200, 200));
             }
-            else if (event.type == Event::LostFocus)
-            {
-                window.setView(View(FloatRect(0, 0, 1800, 800))); // 한 화면 당 5개의 셀
-                window.setPosition(Vector2i(50, 100));
-                window.setSize(Vector2u(1800, 800));
-            }
         }
 
         window.clear(Color(200, 200, 200));
+        chase.clear(Color(200, 200, 200));
+
+        // 0.1초마다 opponent 이동
+        if (clock.getElapsedTime().asSeconds() >= 1.5f && pathIndex < path.size()) {
+            opponent = path[pathIndex];
+            opponentRect.setPosition(opponent.x * CELL_SIZE, opponent.y * CELL_SIZE);
+            pathIndex++;
+            clock.restart();
+
+            chase.setView(View(FloatRect((opponent.x / 5) * 200, (opponent.y / 5) * 200, 200, 200))); // 한 화면 당 5개의 셀
+            chase.setPosition(Vector2i(50 + (opponent.x / 5) * 200, 100 + (opponent.y / 5) * 200));
+            chase.setSize(Vector2u(200, 200));
+
+            window.setPosition(Vector2i(50 + (player.x / 5) * 200, 100 + (player.y / 5) * 200));
+        }
+
         for (int i = 0; i < MAP_WIDTH * MAP_HEIGHT; ++i) {
             window.draw(displayRects[i]);
+
+            // 뷰 중심과 크기를 가져옵니다.
+            float viewCenterX = chase.getView().getCenter().x;
+            float viewCenterY = chase.getView().getCenter().y;
+            float viewSizeX = chase.getView().getSize().x;
+            float viewSizeY = chase.getView().getSize().y;
+
+            // 현재 Rect의 위치를 가져옵니다.
+            float rectPosX = displayRects[i].getPosition().x;
+            float rectPosY = displayRects[i].getPosition().y;
+
+            // Rect가 뷰 안에 있는지 확인합니다.
+            if (rectPosX >= viewCenterX - viewSizeX / 2 &&
+                rectPosX < viewCenterX + viewSizeX / 2 &&
+                rectPosY >= viewCenterY - viewSizeY / 2 &&
+                rectPosY < viewCenterY + viewSizeY / 2) {
+                chase.draw(displayRects[i]);
+            }
         }
+
+
         window.draw(playerRect);
         window.draw(opponentRect);
-
         window.display();
+
+        chase.draw(playerRect);
+        chase.draw(opponentRect);
+        chase.display();
     }
 
     return 0;
