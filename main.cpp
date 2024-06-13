@@ -1,10 +1,12 @@
 #include <SFML/Graphics.hpp>
+#include <SFML/System.hpp>
 #include <iostream>
 #include <stack>
 #include <vector>
 #include <queue>
 #include <cstdlib>
 #include <ctime>
+#include <Windows.h>
 
 using namespace std;
 using namespace sf;
@@ -12,7 +14,6 @@ using namespace sf;
 const int MAP_WIDTH = 45;
 const int MAP_HEIGHT = 20;
 const int CELL_SIZE = 40;
-
 const vector<Vector2i> directions = { // 미로를 뚫을 때에는 2칸씩 뚫음
     Vector2i(2, 0),
     Vector2i(-2, 0),
@@ -26,101 +27,37 @@ const vector<Vector2i> OneDirections = { // 큐에서 사용
     Vector2i(0, -1)
 };
 
-bool isValid(int x, int y, vector<vector<bool>>& visited) {
-    return x > 0 && x < (MAP_WIDTH - 1) && y > 0 && y < (MAP_HEIGHT - 1) && !visited[x][y];
-}
+class CustomClock {
+public:
+    CustomClock() : offset(sf::Time::Zero) {}
 
-void generateMaze(int startX, int startY, int gameMap[], vector<RectangleShape>& displayRects) {
-    vector<vector<bool>> visited(MAP_WIDTH, vector<bool>(MAP_HEIGHT, false));
-    stack<Vector2i> stack;
-    stack.push(Vector2i(startX, startY));
-    visited[startX][startY] = true;
-    gameMap[startX + startY * MAP_WIDTH] = 0;
-
-    while (!stack.empty()) { // 스택을 활용해 DFS 사용
-        Vector2i current = stack.top();
-        stack.pop();
-
-        vector<Vector2i> neighbors; 
-        for (auto dir : directions) {
-            int newX = current.x + dir.x;
-            int newY = current.y + dir.y;
-
-            if (isValid(newX, newY, visited)) {
-                neighbors.push_back(Vector2i(newX, newY)); // 루프마다 새로운 neighbors가 생성되기 때문에 따로 비우지 않음
-            }
-        }
-
-        if (!neighbors.empty()) {
-            stack.push(current); // stack에 푸시하여 백트래킹 방법으로 돌아올 수 있음
-
-            Vector2i next = neighbors[rand() % neighbors.size()]; // 다음 칸을 위에서 본 것 같이 2칸을 간격으로 하여 next를 잡고
-            visited[next.x][next.y] = true;
-            gameMap[next.x + next.y * MAP_WIDTH] = 0;
-
-            int wallX = (current.x + next.x) / 2; //next와 current 사이의 x좌표
-            int wallY = (current.y + next.y) / 2; //next와 current 사이의 y좌표
-            gameMap[wallX + wallY * MAP_WIDTH] = 0; // next와 current 사이를 뚫어 미로를 생성함
-
-            stack.push(next);
-        }
+    void setElapsedTime(sf::Time time) {
+        offset = time - clock.getElapsedTime();
     }
 
-    gameMap[(MAP_WIDTH - 2) + (MAP_HEIGHT - 2) * MAP_WIDTH] = 0; // 출구
-    gameMap[0] = gameMap[1] = gameMap[MAP_WIDTH] = 0; // opponent가 있을 공간 초기화
-}
-
-vector<Vector2i> findPath(Vector2i start, Vector2i goal, int gameMap[]) {
-    queue<Vector2i> q;
-    vector<vector<Vector2i>> prev(MAP_WIDTH, vector<Vector2i>(MAP_HEIGHT, Vector2i(-1, -1)));
-    vector<vector<bool>> visited(MAP_WIDTH, vector<bool>(MAP_HEIGHT, false));
-
-    q.push(start);
-    visited[start.x][start.y] = true;
-
-    while (!q.empty()) { // quene를 통해 bfs 사용
-        Vector2i current = q.front();
-        q.pop();
-
-        if (current == goal)
-            break;
-
-        for (auto dir : OneDirections) {
-            int newX = current.x + dir.x;
-            int newY = current.y + dir.y;
-
-            if (newX >= 0 && newX < MAP_WIDTH && newY >= 0 && newY < MAP_HEIGHT && gameMap[newX + newY * MAP_WIDTH] == 0 && !visited[newX][newY]) {
-                q.push(Vector2i(newX, newY));
-                visited[newX][newY] = true;
-                prev[newX][newY] = current;
-            }
-        }
+    sf::Time getElapsedTime() const {
+        return clock.getElapsedTime() + offset;
     }
-    vector<Vector2i> path;
-    for (Vector2i at = goal; at != Vector2i(-1, -1); at = prev[at.x][at.y])
-        path.push_back(at);
-    reverse(path.begin(), path.end());
-    return path;
-}
 
-void resetGame(Vector2i& player, Vector2i& opponent, RectangleShape& playerRect, RectangleShape& opponentRect, int gameMap[], vector<RectangleShape>& displayRects, vector<Vector2i>& path, size_t& pathIndex, Clock& clock, Clock& freeze, float& moveTimer) {
-    player = Vector2i(1, 1);
-    playerRect.setPosition(player.x * CELL_SIZE, player.y * CELL_SIZE);
+    void restart() {
+        clock.restart();
+        offset = sf::Time::Zero;
+    }
 
-    opponent = Vector2i(0, 0);
-    opponentRect.setPosition(opponent.x * CELL_SIZE, opponent.y * CELL_SIZE);
+private:
+    sf::Clock clock;
+    sf::Time offset;
+};
 
-    Vector2i goal(MAP_WIDTH - 2, MAP_HEIGHT - 2);
-    path = findPath(opponent, goal, gameMap);
-    pathIndex = 0;
-    clock.restart();
-    freeze.restart();
-    moveTimer = 1.0f;
-    
-    // reset game에서는 구현 상의 문제로 다시 generateMaze 하지 않음
-}
+
+bool isValid(int x, int y, vector<vector<bool>>& visited);
+void generateMaze(int startX, int startY, int gameMap[], vector<RectangleShape>& displayRects);
+vector<Vector2i> findPath(Vector2i start, Vector2i goal, int gameMap[]);
+void resetGame(Vector2i& player, Vector2i& opponent, RectangleShape& playerRect, RectangleShape& opponentRect, int gameMap[], vector<RectangleShape>& displayRects, vector<Vector2i>& path, size_t& pathIndex, CustomClock& clock, CustomClock& freeze, float& moveTimer, bool isFrozen);
 
 int main() {
+    ShowWindow(GetConsoleWindow(), FALSE);
+
     RenderWindow window(VideoMode(1800, 800), "Outside The MAZE", Style::None); // 초기 화면
     RenderWindow chase(VideoMode(0, 0), "Chase Window", Style::None); // opponent를 비추는 윈도우
     window.setPosition(Vector2i(50, 100)); // 하드코딩 - 해상도에 따라 달라질 수 있음
@@ -178,8 +115,8 @@ int main() {
     Vector2i goal(MAP_WIDTH - 2, MAP_HEIGHT - 2);
     vector<Vector2i> path = findPath(opponent, goal, gameMap);
     size_t pathIndex = 0;
-    Clock clock;
-    Clock freezeClock;
+    CustomClock clock;
+    CustomClock freezeClock;
     float moveTimer = 1.0f;
 
     bool gameOver = false;
@@ -195,25 +132,9 @@ int main() {
                         gameOver = false;
                         gameWon = false;
                         message.setString("");
-                        resetGame(player, opponent, playerRect, opponentRect, gameMap, displayRects, path, pathIndex, clock, freezeClock, moveTimer);
-                        for (int i = 0; i < MAP_WIDTH * MAP_HEIGHT; ++i) {
-                            window.draw(displayRects[i]);
-
-                            float viewCenterX = chase.getView().getCenter().x;
-                            float viewCenterY = chase.getView().getCenter().y;
-                            float viewSizeX = chase.getView().getSize().x;
-                            float viewSizeY = chase.getView().getSize().y;
-
-                            float rectPosX = displayRects[i].getPosition().x;
-                            float rectPosY = displayRects[i].getPosition().y;
-
-                            if (rectPosX >= viewCenterX - viewSizeX / 2 &&
-                                rectPosX < viewCenterX + viewSizeX / 2 &&
-                                rectPosY >= viewCenterY - viewSizeY / 2 &&
-                                rectPosY < viewCenterY + viewSizeY / 2) {
-                                chase.draw(displayRects[i]);
-                            }
-                        }
+                        resetGame(player, opponent, playerRect, opponentRect, gameMap, displayRects, path, pathIndex, clock, freezeClock, moveTimer, isFrozen);
+ 
+                        
                     }
                     else if (event.key.code == Keyboard::X)
                     {
@@ -231,7 +152,7 @@ int main() {
 
                     isFrozen = true;
                     playerRect.setFillColor(Color(50, 150, 255));  // 더 파랗게
-                    freezeClock.restart();
+                    freezeClock.setElapsedTime(seconds(0.f));
                 }
                 else if (isFrozen == false){
                     int newX = player.x;
@@ -278,7 +199,6 @@ int main() {
             window.setView(View(FloatRect((player.x / 5) * 200, (player.y / 5) * 200, 200, 200)));
             window.setPosition(Vector2i(50 + (player.x / 5) * 200, 100 + (player.y / 5) * 200));
             window.setSize(Vector2u(200, 200));
-
             }
             moveTimer = 1.0f;
         }
@@ -288,7 +208,7 @@ int main() {
                 opponent = path[pathIndex];
                 opponentRect.setPosition(opponent.x * CELL_SIZE, opponent.y * CELL_SIZE);
                 pathIndex++;
-                clock.restart();
+                clock.setElapsedTime(seconds(0.f));
 
                 chase.setView(View(FloatRect((opponent.x / 5) * 200, (opponent.y / 5) * 200, 200, 200))); // window 당 5*5개의 셀이기 때문
                 chase.setPosition(Vector2i(50 + (opponent.x / 5) * 200, 100 + (opponent.y / 5) * 200));
@@ -371,4 +291,102 @@ int main() {
     }
 
     return 0;
+}
+
+
+
+bool isValid(int x, int y, vector<vector<bool>>& visited) {
+    return x > 0 && x < (MAP_WIDTH - 1) && y > 0 && y < (MAP_HEIGHT - 1) && !visited[x][y];
+}
+
+void generateMaze(int startX, int startY, int gameMap[], vector<RectangleShape>& displayRects) {
+    vector<vector<bool>> visited(MAP_WIDTH, vector<bool>(MAP_HEIGHT, false));
+    stack<Vector2i> stack;
+    stack.push(Vector2i(startX, startY));
+    visited[startX][startY] = true;
+    gameMap[startX + startY * MAP_WIDTH] = 0;
+
+    while (!stack.empty()) { // 스택을 활용해 DFS 사용
+        Vector2i current = stack.top();
+        stack.pop();
+
+        vector<Vector2i> neighbors;
+        for (auto dir : directions) {
+            int newX = current.x + dir.x;
+            int newY = current.y + dir.y;
+
+            if (isValid(newX, newY, visited)) {
+                neighbors.push_back(Vector2i(newX, newY)); // 루프마다 새로운 neighbors가 생성되기 때문에 따로 비우지 않음
+            }
+        }
+
+        if (!neighbors.empty()) {
+            stack.push(current); // stack에 푸시하여 백트래킹 방법으로 돌아올 수 있음
+
+            Vector2i next = neighbors[rand() % neighbors.size()]; // 다음 칸을 위에서 본 것 같이 2칸을 간격으로 하여 next를 잡고
+            visited[next.x][next.y] = true;
+            gameMap[next.x + next.y * MAP_WIDTH] = 0;
+
+            int wallX = (current.x + next.x) / 2; //next와 current 사이의 x좌표
+            int wallY = (current.y + next.y) / 2; //next와 current 사이의 y좌표
+            gameMap[wallX + wallY * MAP_WIDTH] = 0; // next와 current 사이를 뚫어 미로를 생성함
+
+            stack.push(next);
+        }
+    }
+
+    gameMap[(MAP_WIDTH - 2) + (MAP_HEIGHT - 2) * MAP_WIDTH] = 0; // 출구
+    gameMap[0] = gameMap[1] = gameMap[MAP_WIDTH] = 0; // opponent가 있을 공간 초기화
+}
+
+vector<Vector2i> findPath(Vector2i start, Vector2i goal, int gameMap[]) {
+    queue<Vector2i> q;
+    vector<vector<Vector2i>> prev(MAP_WIDTH, vector<Vector2i>(MAP_HEIGHT, Vector2i(-1, -1)));
+    vector<vector<bool>> visited(MAP_WIDTH, vector<bool>(MAP_HEIGHT, false));
+
+    q.push(start);
+    visited[start.x][start.y] = true;
+
+    while (!q.empty()) { // quene를 통해 bfs 사용
+        Vector2i current = q.front();
+        q.pop();
+
+        if (current == goal)
+            break;
+
+        for (auto dir : OneDirections) {
+            int newX = current.x + dir.x;
+            int newY = current.y + dir.y;
+
+            if (newX >= 0 && newX < MAP_WIDTH && newY >= 0 && newY < MAP_HEIGHT && gameMap[newX + newY * MAP_WIDTH] == 0 && !visited[newX][newY]) {
+                q.push(Vector2i(newX, newY));
+                visited[newX][newY] = true;
+                prev[newX][newY] = current;
+            }
+        }
+    }
+    vector<Vector2i> path;
+    for (Vector2i at = goal; at != Vector2i(-1, -1); at = prev[at.x][at.y])
+        path.push_back(at);
+    reverse(path.begin(), path.end());
+    return path;
+}
+
+void resetGame(Vector2i& player, Vector2i& opponent, RectangleShape& playerRect, RectangleShape& opponentRect, int gameMap[], vector<RectangleShape>& displayRects, vector<Vector2i>& path, size_t& pathIndex, CustomClock& clock, CustomClock& freeze, float& moveTimer, bool isFrozen) {
+    player = Vector2i(1, 1);
+    playerRect.setPosition(player.x * CELL_SIZE, player.y * CELL_SIZE);
+    playerRect.setFillColor(Color(153, 255, 255));
+
+    opponent = Vector2i(0, 0);
+    opponentRect.setPosition(opponent.x * CELL_SIZE, opponent.y * CELL_SIZE);
+
+    Vector2i goal(MAP_WIDTH - 2, MAP_HEIGHT - 2);
+    path = findPath(opponent, goal, gameMap);
+    pathIndex = 0;
+    clock.setElapsedTime(seconds(0.f));
+    freeze.setElapsedTime(seconds(3.f));
+    moveTimer = 1.0f;
+    isFrozen = false;
+
+    // reset game에서는 구현 상의 문제로 다시 generateMaze 하지 않음
 }
